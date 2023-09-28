@@ -7,7 +7,7 @@ import scala.util.Random
 
 object SnapGame {
 
-  // Created a list of cards for a single deck. ordered.
+  // Creates a list of cards for a single deck. ordered.
   private def newDeck: Seq[Card] =
     (1 to 13).map(num => Card(Suit.Club, num)) ++
       (1 to 13).map(num => Card(Suit.Diamond, num)) ++
@@ -30,6 +30,7 @@ object SnapGame {
 
   // splits the provided list of cards according to the number of players
   // if the list doesn't split evenly, then the remainders will be distributed from the start of the player list
+  // distribution of cards is splitting deck into equal parts, not dealing out a card at a time.
   private def splitCards(
       deck: Seq[Card],
       numberOfPlayers: Int
@@ -93,6 +94,48 @@ object SnapGame {
     }
   }
 
+  // Looks for all the cards that would be won from a Snap
+  // And removes those cards from the hands of the relevant players
+  private def preparePlayersAndCards(
+      players: Seq[Player],
+      matchType: MatchType
+  ): (Seq[Player], Seq[Card]) = {
+    val snappableCards: Set[Card] =
+      getSnappableCards(players, matchType)
+
+    val cardsWon: Seq[(Player, Seq[Card])] =
+      players.map(player => player.takePlayedStackIfMatch(snappableCards))
+
+    val (playersAfterRemove, cardsToWinner) = cardsWon.unzip
+
+    (playersAfterRemove, cardsToWinner.flatten)
+  }
+
+  // Picks a random player to win (all players are able to win, not just those that had snap)
+  // Then gives the cards stack to that player
+  // Returns updated player object for the winner
+  private def chooseWinnerAndGiveCards(
+      players: Seq[Player],
+      cards: Seq[Card]
+  ): Player = {
+    players
+      .map(player => (player, player.getReactionRandomNumber))
+      .minBy(_._2)
+      ._1
+      .giveCards(cards)
+  }
+
+  // Inserts the winner back into the sequence, then rotates player list so next player is now first in the list.
+  private def updatePlayerList(players: Seq[Player], winner: Player) = {
+    val indexOfWinner =
+      players.indexWhere(_.playerNum == winner.playerNum)
+
+    val updatedPlayerList =
+      players.updated(indexOfWinner, winner)
+
+    updatedPlayerList.tail :+ updatedPlayerList.head
+  }
+
   // This plays a card out from the first player in the list.
   // Then analyses the snap situations, moves around cards if required
   // Then moves the first player to the end of the list
@@ -100,32 +143,15 @@ object SnapGame {
       players: Seq[Player],
       matchType: MatchType
   ): Seq[Player] = {
-    // Next work would be to refactor this function.
-    val newPlayers = players.head.playCard +: players.tail
+    val playersAfterPlay = players.head.playCard +: players.tail
 
-    val snappableCards = getSnappableCards(newPlayers, matchType)
+    val (playersAfterRemove, allCardsToWinner) =
+      preparePlayersAndCards(playersAfterPlay, matchType)
 
-    val cardsWon: Seq[(Player, Seq[Card])] =
-      newPlayers.map(player => player.takePlayedStackIfMatch(snappableCards))
+    val newWinningPlayer =
+      chooseWinnerAndGiveCards(playersAfterRemove, allCardsToWinner)
 
-    val (playersAfterRemove, cardsToWinner) = cardsWon.unzip
-
-    val allCardsToWinner = cardsToWinner.flatten
-
-    val playerReactionPairs =
-      playersAfterRemove.map(player => (player, player.getReactionRandomNumber))
-
-    val (winningPlayer, _) = playerReactionPairs.minBy(_._2)
-
-    val newWinningPlayer = winningPlayer.giveCards(allCardsToWinner)
-
-    val indexOfWinner =
-      playersAfterRemove.indexWhere(_.playerNum == newWinningPlayer.playerNum)
-
-    val finalPlayerListThisRound =
-      playersAfterRemove.updated(indexOfWinner, newWinningPlayer)
-
-    finalPlayerListThisRound.tail :+ finalPlayerListThisRound.head
+    updatePlayerList(playersAfterRemove, newWinningPlayer)
   }
 
   // Tail recursive function to play the game.
